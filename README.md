@@ -33,8 +33,11 @@ the part I care about getting right; the format conversion is secondary.
 Blank lines and lines starting with `#` are passed through unchanged in
 either format, so titles and notes survive a round trip.
 
-Quantities can be a plain decimal (`1.5`) or a simple fraction (`1/2`).
-Mixed numbers like `1 1/2` aren't supported yet — see the roadmap.
+Quantities can be a plain decimal (`1.5`), a simple fraction (`1/2`), or a
+mixed number (`1 1/2`). In recipe format the mixed number's whole part and
+fraction stay separated by a single space; in CSV format the whole quantity
+field (including that space) goes in one comma-separated column, e.g.
+`1 1/2,cup,milk`.
 
 ## Usage
 
