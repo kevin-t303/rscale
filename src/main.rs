@@ -1,4 +1,5 @@
 mod ingredient;
+mod units;
 
 use ingredient::{format_csv_line, format_recipe_line, parse_csv_line, parse_recipe_line};
 use std::env;
@@ -28,6 +29,7 @@ struct Args {
     scale: f64,
     input: Option<String>,
     output: Option<String>,
+    unit: Option<String>,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -36,6 +38,7 @@ fn parse_args() -> Result<Args, String> {
     let mut scale = None;
     let mut input = None;
     let mut output = None;
+    let mut unit = None;
 
     let mut args = env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -45,6 +48,7 @@ fn parse_args() -> Result<Args, String> {
             "--scale" => scale = Some(args.next().ok_or("--scale needs a value")?),
             "--input" => input = Some(args.next().ok_or("--input needs a value")?),
             "--output" => output = Some(args.next().ok_or("--output needs a value")?),
+            "--unit" => unit = Some(args.next().ok_or("--unit needs a value")?),
             other => return Err(format!("unknown argument: {other}")),
         }
     }
@@ -68,6 +72,7 @@ fn parse_args() -> Result<Args, String> {
         scale,
         input,
         output,
+        unit,
     })
 }
 
@@ -123,7 +128,20 @@ fn run(args: Args) -> io::Result<()> {
             }
         };
 
-        let scaled = ingredient.scaled(args.scale);
+        let mut scaled = ingredient.scaled(args.scale);
+
+        if let Some(target_unit) = &args.unit {
+            match units::convert(scaled.quantity, &scaled.unit, target_unit, &scaled.name) {
+                Ok(quantity) => {
+                    scaled.quantity = quantity;
+                    scaled.unit = target_unit.clone();
+                }
+                Err(err) => {
+                    eprintln!("line {line_number}: {err}");
+                    continue;
+                }
+            }
+        }
 
         let out_line = match args.to {
             Format::Recipe => format_recipe_line(&scaled),
@@ -141,7 +159,7 @@ fn main() -> ExitCode {
         Err(err) => {
             eprintln!("error: {err}");
             eprintln!(
-                "usage: rscale --from <recipe|csv> --to <recipe|csv> --scale <factor> [--input FILE] [--output FILE]"
+                "usage: rscale --from <recipe|csv> --to <recipe|csv> --scale <factor> [--unit UNIT] [--input FILE] [--output FILE]"
             );
             return ExitCode::FAILURE;
         }
