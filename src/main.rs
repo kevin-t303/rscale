@@ -30,6 +30,7 @@ struct Args {
     input: Option<String>,
     output: Option<String>,
     unit: Option<String>,
+    dry_run: bool,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -39,6 +40,7 @@ fn parse_args() -> Result<Args, String> {
     let mut input = None;
     let mut output = None;
     let mut unit = None;
+    let mut dry_run = false;
 
     let mut args = env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -49,6 +51,7 @@ fn parse_args() -> Result<Args, String> {
             "--input" => input = Some(args.next().ok_or("--input needs a value")?),
             "--output" => output = Some(args.next().ok_or("--output needs a value")?),
             "--unit" => unit = Some(args.next().ok_or("--unit needs a value")?),
+            "--dry-run" => dry_run = true,
             other => return Err(format!("unknown argument: {other}")),
         }
     }
@@ -73,10 +76,15 @@ fn parse_args() -> Result<Args, String> {
         input,
         output,
         unit,
+        dry_run,
     })
 }
 
-fn run(args: Args) -> io::Result<()> {
+/// Runs the conversion. Returns whether any line failed to parse or convert.
+/// In dry-run mode no writer is opened at all, so an existing `--output`
+/// file is left untouched rather than being truncated by a run that's only
+/// meant to check the input.
+fn run(args: &Args) -> io::Result<bool> {
     // Both the reader and writer are line-buffered wrappers, not owned
     // strings, so a multi-gigabyte recipe file costs one line of memory
     // at a time rather than the whole file.
@@ -95,25 +103,36 @@ fn run(args: Args) -> io::Result<()> {
 
     let stdout;
     let file_out;
-    let mut writer: Box<dyn Write> = match &args.output {
-        Some(path) => {
-            file_out = File::create(path)?;
-            Box::new(BufWriter::new(file_out))
-        }
-        None => {
-            stdout = io::stdout();
-            Box::new(BufWriter::new(stdout))
+    let mut writer: Option<Box<dyn Write>> = if args.dry_run {
+        None
+    } else {
+        match &args.output {
+            Some(path) => {
+                file_out = File::create(path)?;
+                Some(Box::new(BufWriter::new(file_out)))
+            }
+            None => {
+                stdout = io::stdout();
+                Some(Box::new(BufWriter::new(stdout)))
+            }
         }
     };
+
+    let mut line_count = 0;
+    let mut error_count = 0;
 
     for (number, line) in reader.lines().enumerate() {
         let line = line?;
         let line_number = number + 1;
 
         if line.trim().is_empty() || line.trim_start().starts_with('#') {
-            writeln!(writer, "{line}")?;
+            if let Some(writer) = writer.as_mut() {
+                writeln!(writer, "{line}")?;
+            }
             continue;
         }
+
+        line_count += 1;
 
         let parsed = match args.from {
             Format::Recipe => parse_recipe_line(&line),
@@ -124,6 +143,7 @@ fn run(args: Args) -> io::Result<()> {
             Ok(ingredient) => ingredient,
             Err(err) => {
                 eprintln!("line {line_number}: {err}");
+                error_count += 1;
                 continue;
             }
         };
@@ -138,19 +158,30 @@ fn run(args: Args) -> io::Result<()> {
                 }
                 Err(err) => {
                     eprintln!("line {line_number}: {err}");
+                    error_count += 1;
                     continue;
                 }
             }
         }
 
-        let out_line = match args.to {
-            Format::Recipe => format_recipe_line(&scaled),
-            Format::Csv => format_csv_line(&scaled),
-        };
-        writeln!(writer, "{out_line}")?;
+        if let Some(writer) = writer.as_mut() {
+            let out_line = match args.to {
+                Format::Recipe => format_recipe_line(&scaled),
+                Format::Csv => format_csv_line(&scaled),
+            };
+            writeln!(writer, "{out_line}")?;
+        }
     }
 
-    writer.flush()
+    if let Some(writer) = writer.as_mut() {
+        writer.flush()?;
+    }
+
+    if args.dry_run {
+        println!("dry run: {line_count} line(s) checked, {error_count} error(s)");
+    }
+
+    Ok(error_count > 0)
 }
 
 fn main() -> ExitCode {
@@ -159,14 +190,21 @@ fn main() -> ExitCode {
         Err(err) => {
             eprintln!("error: {err}");
             eprintln!(
-                "usage: rscale --from <recipe|csv> --to <recipe|csv> --scale <factor> [--unit UNIT] [--input FILE] [--output FILE]"
+                "usage: rscale --from <recipe|csv> --to <recipe|csv> --scale <factor> [--unit UNIT] [--input FILE] [--output FILE] [--dry-run]"
             );
             return ExitCode::FAILURE;
         }
     };
 
-    match run(args) {
-        Ok(()) => ExitCode::SUCCESS,
+    let dry_run = args.dry_run;
+    match run(&args) {
+        Ok(had_errors) => {
+            if dry_run && had_errors {
+                ExitCode::FAILURE
+            } else {
+                ExitCode::SUCCESS
+            }
+        }
         Err(err) => {
             eprintln!("error: {err}");
             ExitCode::FAILURE

@@ -65,6 +65,16 @@ stdout, so it composes with other line-oriented tools.
 Lines that fail to parse are reported on stderr with their line number and
 skipped, rather than aborting the whole conversion.
 
+Pass `--dry-run` to check a file without converting it: every line is parsed
+(and, if `--unit` is given, run through the unit conversion) but nothing is
+written, and `--output` is left untouched even if it names an existing file.
+Errors print the same as a normal run, followed by a one-line summary, and
+the process exits non-zero if any line failed.
+
+```
+rscale --from recipe --to csv --scale 1 --input pancakes.recipe --dry-run
+```
+
 ## Unit conversion
 
 `--unit <target>` converts every ingredient's unit to `<target>` after
