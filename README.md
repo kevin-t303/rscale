@@ -104,6 +104,12 @@ Standard library only, no external crates:
 cargo build --release
 ```
 
+## Testing
+
+`cargo test` runs the unit tests alongside `tests/cli.rs`, which builds the
+binary and runs it against the fixtures in `tests/fixtures/` to check the
+formats, scaling, unit conversion, and error handling end to end.
+
 ## License
 
 MIT, see LICENSE.
